@@ -1,5 +1,7 @@
 # IVAO REF Booking System
 
+![pic.jpg](pic.jpg)
+
 A comprehensive flight slot booking system for IVAO divisions, allowing pilots to book departure, arrival, and private flight slots for organized events.
 
 ## Features
