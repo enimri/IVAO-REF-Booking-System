@@ -143,12 +143,18 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 				</div>
 				
 				<div class="nav-right">
+					<?php $user = current_user(); ?>
 					<span class="nav-right-item" title="Profile">
 						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
 							<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
 							<circle cx="12" cy="7" r="4"></circle>
 						</svg>
 					</span>
+					<?php if (!empty($user)): ?>
+						<span class="nav-username" title="<?php echo e($user['name'] ?? $user['vid']); ?>">
+							Welcome, <?php echo e($user['name'] ?? $user['vid']); ?>
+						</span>
+					<?php endif; ?>
 					<a class="btn secondary btn-small" href="<?php echo e(base_url('logout.php')); ?>" title="Logout">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 0.25rem;">
 							<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
