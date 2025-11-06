@@ -136,12 +136,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			redirect_with_message(base_url('manage_timetable.php'), 'success', 'Flight added.');
 		} else {
 			$id = (int)($_POST['id'] ?? 0);
+			
+			// Get old flight data before update
+			$stmt = $pdo->prepare('SELECT * FROM flights WHERE id = ?');
+			$stmt->execute([$id]);
+			$oldFlight = $stmt->fetch();
+			
+			// Update flight
             $stmt = $pdo->prepare('UPDATE flights SET flight_number=?, airline_name=?, airline_iata=?, airline_icao=?, aircraft=?, origin_icao=?, origin_name=?, destination_icao=?, destination_name=?, departure_time_zulu=?, route=?, gate=?, category=? WHERE id=?');
             $stmt->execute([$flight_number,$airline_name,$airline_iata,$airline_icao,$aircraft,$origin_icao,$origin_name,$destination_icao,$destination_name,$departure_time_zulu,$route,$gate,$category,$id]);
 			
 			// Auto-sync airline name after update
 			if ($id > 0) {
 				sync_flight_airline_name($id, $flight_number, $airline_name, $airline_iata, $airline_icao);
+			}
+			
+			// Get updated flight data
+			$stmt = $pdo->prepare('SELECT * FROM flights WHERE id = ?');
+			$stmt->execute([$id]);
+			$newFlight = $stmt->fetch();
+			
+			// Detect changes and send email notifications
+			if ($oldFlight && $newFlight) {
+				require_once __DIR__ . '/includes/email.php';
+				
+				$changes = [];
+				$importantFields = ['flight_number', 'airline_name', 'aircraft', 'origin_icao', 'destination_icao', 'departure_time_zulu', 'gate'];
+				
+				foreach ($importantFields as $field) {
+					$oldValue = $oldFlight[$field] ?? '';
+					$newValue = $newFlight[$field] ?? '';
+					if (trim($oldValue) !== trim($newValue)) {
+						$changes[$field] = trim($oldValue) . ' → ' . trim($newValue);
+					}
+				}
+				
+				// Send email if there are changes
+				if (!empty($changes)) {
+					send_flight_update_email($newFlight, $changes);
+				}
 			}
 			
 			redirect_with_message(base_url('manage_timetable.php'), 'success', 'Flight updated.');

@@ -1,29 +1,90 @@
 <?php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/helpers.php';
+require_once __DIR__ . '/includes/email.php';
 
 require_login();
 $user = current_user();
 $pdo = db();
 
-// Handle unbook action
+// Handle unbook action and private slot cancellation
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (!csrf_validate($_POST['csrf'] ?? '')) {
 		redirect_with_message(base_url('my_bookings.php'), 'error', 'Invalid CSRF token.');
 	}
 	$action = $_POST['action'] ?? '';
 	$flightId = (int)($_POST['flight_id'] ?? 0);
+	$requestId = (int)($_POST['request_id'] ?? 0);
+	
+	// Handle private slot request cancellation
+	if ($action === 'cancel_private_slot' && $requestId > 0) {
+		require_once __DIR__ . '/includes/email.php';
+		
+		// Get request details
+		$stmt = $pdo->prepare('SELECT * FROM private_slot_requests WHERE id = ? AND vid = ?');
+		$stmt->execute([$requestId, $user['vid']]);
+		$request = $stmt->fetch();
+		
+		if (!$request) {
+			redirect_with_message(base_url('my_bookings.php'), 'error', 'Private slot request not found.');
+		}
+		
+		// Only allow cancellation if status is approved or rejected
+		if (!in_array($request['status'], ['approved', 'rejected'], true)) {
+			redirect_with_message(base_url('my_bookings.php'), 'error', 'You can only cancel approved or rejected requests.');
+		}
+		
+		// Update status to cancelled
+		$stmt = $pdo->prepare('UPDATE private_slot_requests SET status=?, updated_at=NOW() WHERE id=? AND vid=?');
+		$stmt->execute(['cancelled', $requestId, $user['vid']]);
+		
+		if ($stmt->rowCount() > 0) {
+			// Get updated request for email
+			$stmt = $pdo->prepare('SELECT * FROM private_slot_requests WHERE id = ?');
+			$stmt->execute([$requestId]);
+			$updatedRequest = $stmt->fetch();
+			
+			// Send cancellation email (no reason provided since user cancelled)
+			if ($updatedRequest) {
+				send_private_slot_cancellation_email($user, $updatedRequest, '');
+			}
+			
+			redirect_with_message(base_url('my_bookings.php'), 'success', 'Your private slot request has been cancelled.');
+		} else {
+			redirect_with_message(base_url('my_bookings.php'), 'error', 'Unable to cancel private slot request.');
+		}
+	}
 	
 	if ($action === 'unbook' && $flightId > 0) {
+		// Get flight details before deletion
+		$stmt = $pdo->prepare('SELECT f.*, b.booked_by_vid FROM flights f INNER JOIN bookings b ON b.flight_id = f.id WHERE f.id = ?');
+		$stmt->execute([$flightId]);
+		$bookingData = $stmt->fetch();
+		
 		// Only allow unbooking own flights (or admin)
 		if (is_admin()) {
 			$stmt = $pdo->prepare('DELETE FROM bookings WHERE flight_id = ?');
 			$stmt->execute([$flightId]);
+			
+			// Send cancellation email if booking existed
+			if ($bookingData) {
+				$stmt = $pdo->prepare('SELECT vid, name, email FROM users WHERE vid = ?');
+				$stmt->execute([$bookingData['booked_by_vid']]);
+				$bookedUser = $stmt->fetch();
+				if ($bookedUser && $bookingData) {
+					send_booking_cancellation_email($bookedUser, $bookingData);
+				}
+			}
+			
 			redirect_with_message(base_url('my_bookings.php'), 'success', 'Booking cleared.');
 		} else {
 			$stmt = $pdo->prepare('DELETE FROM bookings WHERE flight_id = ? AND booked_by_vid = ?');
 			$stmt->execute([$flightId, $user['vid']]);
 			if ($stmt->rowCount() > 0) {
+				// Send cancellation email
+				if ($bookingData) {
+					send_booking_cancellation_email($user, $bookingData);
+				}
 				redirect_with_message(base_url('my_bookings.php'), 'success', 'Your booking has been cancelled.');
 			} else {
 				redirect_with_message(base_url('my_bookings.php'), 'error', 'Unable to cancel booking.');
@@ -283,6 +344,7 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 											<th>Status</th>
 											<th>Submitted</th>
 											<th>Updated</th>
+											<th>Actions</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -324,6 +386,18 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 														echo '-';
 													}
 												?>
+											</td>
+											<td data-label="Actions">
+												<?php if (in_array($req['status'], ['approved', 'rejected'], true)): ?>
+													<form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to cancel this private slot request?');">
+														<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
+														<input type="hidden" name="request_id" value="<?php echo (int)$req['id']; ?>" />
+														<input type="hidden" name="action" value="cancel_private_slot" />
+														<button class="btn warning btn-small" type="submit">Cancel</button>
+													</form>
+												<?php else: ?>
+													<span style="color: var(--text-secondary); font-size: 0.875rem;">-</span>
+												<?php endif; ?>
 											</td>
 										</tr>
 										<?php endforeach; ?>

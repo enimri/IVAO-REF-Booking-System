@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/helpers.php';
+require_once __DIR__ . '/includes/email.php';
 
 $pdo = db();
 $tab = isset($_GET['tab']) && in_array($_GET['tab'], ['departure','arrival','private'], true) ? $_GET['tab'] : 'departure';
@@ -41,17 +42,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			}
 			$stmt = $pdo->prepare('INSERT INTO bookings (flight_id, booked_by_vid) VALUES (?, ?)');
 			$stmt->execute([$flightId, $user['vid']]);
+			
+			// Get flight details for email
+			$stmt = $pdo->prepare('SELECT * FROM flights WHERE id = ?');
+			$stmt->execute([$flightId]);
+			$flight = $stmt->fetch();
+			
+			// Send booking confirmation email
+			if ($flight) {
+				send_booking_confirmation_email($user, $flight);
+			}
+			
 			redirect_with_message(base_url('timetable.php?tab=' . $tab), 'success', 'Booked successfully.');
 		} elseif ($action === 'unbook') {
+			// Get flight and booking details before deletion
+			$stmt = $pdo->prepare('SELECT f.*, b.booked_by_vid FROM flights f INNER JOIN bookings b ON b.flight_id = f.id WHERE f.id = ?');
+			$stmt->execute([$flightId]);
+			$bookingData = $stmt->fetch();
+			
 			// Allow only the same user (or admin) to unbook
 			if (is_admin()) {
 				$stmt = $pdo->prepare('DELETE FROM bookings WHERE flight_id = ?');
 				$stmt->execute([$flightId]);
+				
+				// Send cancellation email if booking existed
+				if ($bookingData) {
+					$stmt = $pdo->prepare('SELECT vid, name, email FROM users WHERE vid = ?');
+					$stmt->execute([$bookingData['booked_by_vid']]);
+					$bookedUser = $stmt->fetch();
+					if ($bookedUser && $bookingData) {
+						send_booking_cancellation_email($bookedUser, $bookingData);
+					}
+				}
+				
 				redirect_with_message(base_url('timetable.php?tab=' . $tab), 'success', 'Booking cleared.');
+			} else {
+				$stmt = $pdo->prepare('DELETE FROM bookings WHERE flight_id = ? AND booked_by_vid = ?');
+				$stmt->execute([$flightId, $user['vid']]);
+				
+				if ($stmt->rowCount() > 0 && $bookingData) {
+					// Send cancellation email
+					send_booking_cancellation_email($user, $bookingData);
+				}
+				
+				redirect_with_message(base_url('timetable.php?tab=' . $tab), 'success', 'Your booking has been cancelled.');
 			}
-			$stmt = $pdo->prepare('DELETE FROM bookings WHERE flight_id = ? AND booked_by_vid = ?');
-			$stmt->execute([$flightId, $user['vid']]);
-			redirect_with_message(base_url('timetable.php?tab=' . $tab), 'success', 'Your booking has been cancelled.');
 		}
 	}
 }

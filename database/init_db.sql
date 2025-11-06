@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS private_slot_requests (
 	destination_icao VARCHAR(4) NOT NULL,
 	departure_time_zulu CHAR(5) NOT NULL,
 	status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+	rejection_reason TEXT NULL,
+	cancellation_reason TEXT NULL,
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TIMESTAMP NULL DEFAULT NULL,
 	CONSTRAINT fk_psr_user FOREIGN KEY (vid) REFERENCES users(vid) ON DELETE CASCADE
@@ -99,15 +101,10 @@ CREATE TABLE IF NOT EXISTS airports (
 	INDEX idx_country (country_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Default admin user and role (optional - uncomment and replace with your own admin VID)
--- To create an admin user, replace 'YOUR_VID_HERE' with your IVAO VID and uncomment these lines:
--- 
--- INSERT INTO users (vid, name, email, is_staff)
--- VALUES ('YOUR_VID_HERE', 'Admin', NULL, 1)
--- ON DUPLICATE KEY UPDATE name=VALUES(name);
--- 
--- INSERT IGNORE INTO user_roles (vid, role)
--- VALUES ('YOUR_VID_HERE', 'admin');
--- 
--- Note: After first login via IVAO OAuth, the user will be created automatically.
--- You can then manually grant admin privileges using the above SQL statements.
+-- Default admin user and role
+INSERT INTO users (vid, name, email, is_staff)
+VALUES ('744759', 'Admin 744759', NULL, 1)
+ON DUPLICATE KEY UPDATE name=VALUES(name);
+
+INSERT IGNORE INTO user_roles (vid, role)
+VALUES ('744759', 'admin');

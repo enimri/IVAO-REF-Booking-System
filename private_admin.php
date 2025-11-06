@@ -1,12 +1,25 @@
 <?php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/helpers.php';
+require_once __DIR__ . '/includes/email.php';
 
 require_login();
 if (!is_private_admin() && !is_admin()) {
 	redirect_with_message(base_url(''), 'error', 'Private Slot Admins only.');
 }
 $pdo = db();
+
+// Ensure rejection_reason and cancellation_reason columns exist
+try {
+	$pdo->exec('ALTER TABLE private_slot_requests ADD COLUMN rejection_reason TEXT NULL AFTER status');
+} catch (Throwable $e) {
+	// Column might already exist, ignore
+}
+try {
+	$pdo->exec('ALTER TABLE private_slot_requests ADD COLUMN cancellation_reason TEXT NULL AFTER rejection_reason');
+} catch (Throwable $e) {
+	// Column might already exist, ignore
+}
 
 // Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -18,10 +31,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	if ($action === 'clear_all') {
 		$pdo->exec('DELETE FROM private_slot_requests');
 		redirect_with_message(base_url('private_admin.php'), 'success', 'All private slot requests cleared.');
+	} elseif ($action === 'clear' && $id > 0) {
+		// Get request details before deletion (for potential email notification)
+		$stmt = $pdo->prepare('SELECT * FROM private_slot_requests WHERE id = ?');
+		$stmt->execute([$id]);
+		$request = $stmt->fetch();
+		
+		// Delete the request
+		$stmt = $pdo->prepare('DELETE FROM private_slot_requests WHERE id = ?');
+		$stmt->execute([$id]);
+		
+		if ($stmt->rowCount() > 0) {
+			redirect_with_message(base_url('private_admin.php'), 'success', 'Private slot request deleted.');
+		} else {
+			redirect_with_message(base_url('private_admin.php'), 'error', 'Request not found.');
+		}
 	} elseif (in_array($action, ['approve','reject','cancel'], true)) {
 		$status = $action === 'approve' ? 'approved' : ($action === 'reject' ? 'rejected' : 'cancelled');
-		$stmt = $pdo->prepare('UPDATE private_slot_requests SET status=?, updated_at=NOW() WHERE id=?');
-		$stmt->execute([$status, $id]);
+		$rejectionReason = '';
+		$cancellationReason = '';
+		
+		// Get rejection reason if rejecting
+		if ($action === 'reject') {
+			$rejectionReason = trim($_POST['rejection_reason'] ?? '');
+		}
+		
+		// Get cancellation reason if cancelling
+		if ($action === 'cancel') {
+			$cancellationReason = trim($_POST['cancellation_reason'] ?? '');
+		}
+		
+		// Update status, rejection reason, and cancellation reason
+		$stmt = $pdo->prepare('UPDATE private_slot_requests SET status=?, rejection_reason=?, cancellation_reason=?, updated_at=NOW() WHERE id=?');
+		$stmt->execute([$status, $rejectionReason, $cancellationReason, $id]);
+		
+		// Get request details for email
+		$stmt = $pdo->prepare('SELECT * FROM private_slot_requests WHERE id = ?');
+		$stmt->execute([$id]);
+		$request = $stmt->fetch();
+		
+		if ($request) {
+			// Get user details
+			$stmt = $pdo->prepare('SELECT vid, name, email FROM users WHERE vid = ?');
+			$stmt->execute([$request['vid']]);
+			$user = $stmt->fetch();
+			
+			if ($user) {
+				// Send email based on action
+				if ($action === 'approve') {
+					send_private_slot_approval_email($user, $request);
+				} elseif ($action === 'reject') {
+					send_private_slot_rejection_email($user, $request, $rejectionReason);
+				} elseif ($action === 'cancel') {
+					send_private_slot_cancellation_email($user, $request, $cancellationReason);
+				}
+			}
+		}
+		
 		redirect_with_message(base_url('private_admin.php'), 'success', 'Updated request.');
 	}
 }
@@ -276,31 +342,35 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
 															<button class="btn success btn-small" name="action" value="approve" type="submit">Approve</button>
 														</form>
-														<form method="post" style="display: inline;">
+														<button class="btn danger btn-small" onclick="openRejectModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')">Reject</button>
+														<button class="btn warning btn-small" onclick="openCancelModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')">Cancel</button>
+														<form method="post" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this private slot request? This action cannot be undone.');">
 															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn danger btn-small" name="action" value="reject" type="submit">Reject</button>
-														</form>
-														<form method="post" style="display: inline;">
-															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
-															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn warning btn-small" name="action" value="cancel" type="submit">Cancel</button>
+															<button class="btn danger btn-small" name="action" value="clear" type="submit" title="Delete Request">
+																<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																	<polyline points="3 6 5 6 21 6"></polyline>
+																	<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+																</svg>
+															</button>
 														</form>
 													<?php elseif ($r['status'] === 'approved'): ?>
-														<form method="post" style="display: inline;">
-															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
-															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn warning btn-small" name="action" value="cancel" type="submit">Cancel</button>
-														</form>
+														<button class="btn warning btn-small" onclick="openCancelModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')">Cancel</button>
 														<form method="post" style="display: inline;">
 															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
 															<button class="btn success btn-small" name="action" value="approve" type="submit" title="Re-approve">Approve</button>
 														</form>
-														<form method="post" style="display: inline;">
+														<button class="btn danger btn-small" onclick="openRejectModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')">Reject</button>
+														<form method="post" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this private slot request? This action cannot be undone.');">
 															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn danger btn-small" name="action" value="reject" type="submit">Reject</button>
+															<button class="btn danger btn-small" name="action" value="clear" type="submit" title="Delete Request">
+																<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																	<polyline points="3 6 5 6 21 6"></polyline>
+																	<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+																</svg>
+															</button>
 														</form>
 													<?php elseif ($r['status'] === 'rejected'): ?>
 														<form method="post" style="display: inline;">
@@ -308,15 +378,17 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
 															<button class="btn success btn-small" name="action" value="approve" type="submit">Approve</button>
 														</form>
-														<form method="post" style="display: inline;">
+														<button class="btn danger btn-small" onclick="openRejectModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')" title="Re-reject">Reject</button>
+														<button class="btn warning btn-small" onclick="openCancelModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')">Cancel</button>
+														<form method="post" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this private slot request? This action cannot be undone.');">
 															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn danger btn-small" name="action" value="reject" type="submit" title="Re-reject">Reject</button>
-														</form>
-														<form method="post" style="display: inline;">
-															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
-															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn warning btn-small" name="action" value="cancel" type="submit">Cancel</button>
+															<button class="btn danger btn-small" name="action" value="clear" type="submit" title="Delete Request">
+																<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																	<polyline points="3 6 5 6 21 6"></polyline>
+																	<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+																</svg>
+															</button>
 														</form>
 													<?php elseif ($r['status'] === 'cancelled'): ?>
 														<form method="post" style="display: inline;">
@@ -324,15 +396,17 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
 															<button class="btn success btn-small" name="action" value="approve" type="submit">Approve</button>
 														</form>
-														<form method="post" style="display: inline;">
+														<button class="btn danger btn-small" onclick="openRejectModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')">Reject</button>
+														<button class="btn warning btn-small" onclick="openCancelModal(<?php echo (int)$r['id']; ?>, '<?php echo e($r['flight_number']); ?>')" title="Re-cancel">Cancel</button>
+														<form method="post" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this private slot request? This action cannot be undone.');">
 															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
 															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn danger btn-small" name="action" value="reject" type="submit">Reject</button>
-														</form>
-														<form method="post" style="display: inline;">
-															<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
-															<input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>" />
-															<button class="btn warning btn-small" name="action" value="cancel" type="submit" title="Re-cancel">Cancel</button>
+															<button class="btn danger btn-small" name="action" value="clear" type="submit" title="Delete Request">
+																<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																	<polyline points="3 6 5 6 21 6"></polyline>
+																	<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+																</svg>
+															</button>
 														</form>
 													<?php else: ?>
 														<span class="badge">No actions</span>
@@ -349,6 +423,48 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 			</div>
 		</div>
 	</div>
+	<!-- Rejection Reason Modal -->
+	<div id="rejectModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+		<div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto;">
+			<h3 style="margin-top: 0;">Reject Private Slot Request</h3>
+			<p style="color: var(--text-secondary); margin-bottom: 16px;">Flight: <strong id="rejectModalFlight"></strong></p>
+			<form method="post" id="rejectForm">
+				<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
+				<input type="hidden" name="id" id="rejectModalId" />
+				<input type="hidden" name="action" value="reject" />
+				<div class="form-group">
+					<label class="label">Rejection Reason (Optional)</label>
+					<textarea class="input" name="rejection_reason" id="rejectModalReason" rows="4" placeholder="Enter reason for rejection..."></textarea>
+				</div>
+				<div style="display: flex; gap: 12px; margin-top: 20px;">
+					<button type="button" class="btn secondary" onclick="closeRejectModal()" style="flex: 1;">Cancel</button>
+					<button type="submit" class="btn danger" style="flex: 1;">Reject Request</button>
+				</div>
+			</form>
+		</div>
+	</div>
+	
+	<!-- Cancellation Reason Modal -->
+	<div id="cancelModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+		<div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto;">
+			<h3 style="margin-top: 0;">Cancel Private Slot Request</h3>
+			<p style="color: var(--text-secondary); margin-bottom: 16px;">Flight: <strong id="cancelModalFlight"></strong></p>
+			<form method="post" id="cancelForm">
+				<input type="hidden" name="csrf" value="<?php echo e(csrf_token()); ?>" />
+				<input type="hidden" name="id" id="cancelModalId" />
+				<input type="hidden" name="action" value="cancel" />
+				<div class="form-group">
+					<label class="label">Cancellation Reason (Optional)</label>
+					<textarea class="input" name="cancellation_reason" id="cancelModalReason" rows="4" placeholder="Enter reason for cancellation..."></textarea>
+				</div>
+				<div style="display: flex; gap: 12px; margin-top: 20px;">
+					<button type="button" class="btn secondary" onclick="closeCancelModal()" style="flex: 1;">Close</button>
+					<button type="submit" class="btn warning" style="flex: 1;">Cancel Request</button>
+				</div>
+			</form>
+		</div>
+	</div>
+	
 	<?php include __DIR__ . '/includes/footer.php'; ?>
 	<script>
 		function toggleSidebar() {
@@ -367,6 +483,51 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 			if (!isClickInside && sidebar.classList.contains('active') && window.innerWidth <= 1024) {
 				sidebar.classList.remove('active');
 				hamburger.classList.remove('active');
+			}
+		});
+		
+		// Rejection modal functions
+		function openRejectModal(id, flightNumber) {
+			document.getElementById('rejectModalId').value = id;
+			document.getElementById('rejectModalFlight').textContent = flightNumber;
+			document.getElementById('rejectModalReason').value = '';
+			document.getElementById('rejectModal').style.display = 'flex';
+		}
+		
+		function closeRejectModal() {
+			document.getElementById('rejectModal').style.display = 'none';
+		}
+		
+		// Cancellation modal functions
+		function openCancelModal(id, flightNumber) {
+			document.getElementById('cancelModalId').value = id;
+			document.getElementById('cancelModalFlight').textContent = flightNumber;
+			document.getElementById('cancelModalReason').value = '';
+			document.getElementById('cancelModal').style.display = 'flex';
+		}
+		
+		function closeCancelModal() {
+			document.getElementById('cancelModal').style.display = 'none';
+		}
+		
+		// Close modals when clicking outside
+		document.getElementById('rejectModal').addEventListener('click', function(e) {
+			if (e.target === this) {
+				closeRejectModal();
+			}
+		});
+		
+		document.getElementById('cancelModal').addEventListener('click', function(e) {
+			if (e.target === this) {
+				closeCancelModal();
+			}
+		});
+		
+		// Close modals on Escape key
+		document.addEventListener('keydown', function(e) {
+			if (e.key === 'Escape') {
+				closeRejectModal();
+				closeCancelModal();
 			}
 		});
 	</script>

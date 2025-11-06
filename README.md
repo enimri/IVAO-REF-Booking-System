@@ -14,8 +14,10 @@ A comprehensive flight slot booking system for IVAO divisions, allowing pilots t
 - 📊 **Event Management** - Create and manage events with booking control
 - 🛫 **Flight Import** - Import flights via CSV files
 - 🏢 **Airline & Airport Management** - Manage airline and airport databases
-- 📝 **Private Slot Requests** - Users can request custom private flight slots
+- 📝 **Private Slot Requests** - Users can request custom private flight slots with admin approval/rejection
 - 📖 **My Bookings** - View and manage personal bookings
+- 📧 **Email Notifications** - Automated email notifications for bookings, cancellations, and flight updates
+- 🗑️ **Request Management** - Delete individual private slot requests with confirmation
 
 ## Requirements
 
@@ -23,6 +25,7 @@ A comprehensive flight slot booking system for IVAO divisions, allowing pilots t
 - MySQL 5.7 or higher (or MariaDB 10.3+)
 - Web server (Apache/Nginx)
 - IVAO OAuth Application (Client ID and Secret)
+- PHP `mail()` function enabled (for email notifications)
 
 ## Installation
 
@@ -45,6 +48,12 @@ mysql -u your_username -p your_database < database/init_db.sql
 
 Or manually execute the SQL file in phpMyAdmin or your preferred MySQL client.
 
+**Important**: The database should use `utf8mb4` character set for proper Unicode support. If your database uses a different character set, you can convert it manually:
+
+```sql
+ALTER DATABASE `your_database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
 ### 3. Configuration
 
 1. Copy the example configuration file:
@@ -56,6 +65,7 @@ Or manually execute the SQL file in phpMyAdmin or your preferred MySQL client.
    - **IVAO OAuth Credentials**: Get your `client_id` and `client_secret` from your IVAO OAuth application
    - **Database Credentials**: Update `$DB_HOST`, `$DB_NAME`, `$DB_USER`, and `$DB_PASS`
    - **Redirect URI**: Should match your OAuth application's redirect URI (usually `https://yourdomain.com/oauth_callback.php`)
+   - **Email Configuration** (Optional): Define `EMAIL_FROM_ADDRESS` constant or set `EMAIL_FROM_ADDRESS` environment variable for custom sender address
 
 ### 4. File Permissions
 
@@ -95,6 +105,25 @@ server {
 2. Set the redirect URI to: `https://yourdomain.com/oauth_callback.php`
 3. Copy the Client ID and Client Secret to your `config.php`
 
+## Email Configuration
+
+The system uses PHP's `mail()` function to send automated email notifications. To configure:
+
+1. **Default Sender**: The system will use `noreply@yourdomain.com` by default
+2. **Custom Sender**: Add to `config.php`:
+   ```php
+   define('EMAIL_FROM_ADDRESS', 'bookings@yourdomain.com');
+   ```
+3. **Environment Variable**: Alternatively, set the `EMAIL_FROM_ADDRESS` environment variable
+
+**Email Notifications Include**:
+- Booking confirmation emails
+- Booking cancellation emails
+- Private slot request approval emails
+- Private slot request rejection emails (with reason)
+- Private slot request cancellation emails (with reason)
+- Flight update notifications (when flight details change)
+
 ## Admin Setup
 
 ### Option 1: Via Database (Recommended)
@@ -125,6 +154,7 @@ Edit `database/init_db.sql`, uncomment the admin user section, replace `YOUR_VID
 3. **Book Slots**: Click "Book" on available flights (when system is open)
 4. **My Bookings**: View and manage your booked slots
 5. **Request Private Slots**: Submit requests for custom flight slots
+6. **Email Notifications**: Receive automatic email notifications for all booking-related actions
 
 ### For Administrators
 
@@ -132,7 +162,11 @@ Edit `database/init_db.sql`, uncomment the admin user section, replace `YOUR_VID
 2. **Manage Flights**: Add flights manually or import via CSV
 3. **Manage Airlines**: Add and edit airline information
 4. **Manage Airports**: Add and edit airport information
-5. **Manage Private Requests**: Approve or reject private slot requests
+5. **Manage Private Requests**: 
+   - Approve or reject private slot requests
+   - Provide rejection reasons (optional)
+   - Cancel requests with cancellation reasons (optional)
+   - Delete individual requests
 6. **System Status**: Monitor system health and statistics
 
 ## CSV Import Format
@@ -160,8 +194,9 @@ FYC701,Air Arabia,OMDB,OEJN,08:00,09:30,A320,UBBLB UL602,U1
 ├── database/
 │   └── init_db.sql           # Database schema
 ├── includes/
+│   ├── email.php             # Email notification functions
 │   ├── footer.php            # Footer template
-│   └── helpers.php            # Helper functions
+│   └── helpers.php           # Helper functions
 ├── index.php                  # Home page
 ├── login.php                  # Login page
 ├── logout.php                 # Logout handler
@@ -177,15 +212,39 @@ FYC701,Air Arabia,OMDB,OEJN,08:00,09:30,A320,UBBLB UL602,U1
 │   │   └── styles.css        # Stylesheet
 │   └── uploads/              # User uploads (logo, favicon, etc.)
 ├── system_status.php         # System status page
-├── timetable.php             # Flight timetable
-└── update_database.php       # Database update utility
+└── timetable.php             # Flight timetable
 ```
+
+## Email Notification System
+
+The system includes a comprehensive email notification system that sends HTML emails for:
+
+- **Booking Confirmations**: Sent when a user successfully books a flight
+- **Booking Cancellations**: Sent when a booking is cancelled (by user or admin)
+- **Private Slot Approvals**: Sent when a private slot request is approved
+- **Private Slot Rejections**: Sent when a private slot request is rejected (includes rejection reason if provided)
+- **Private Slot Cancellations**: Sent when a private slot request is cancelled (includes cancellation reason if provided)
+- **Flight Updates**: Sent to all users who booked a flight when flight details are updated
+
+All emails are sent in HTML format with a professional design and include relevant flight/request details.
+
+## Private Slot Request Management
+
+Administrators can manage private slot requests with the following features:
+
+- **Approve Requests**: Instantly approve requests (sends approval email)
+- **Reject Requests**: Reject requests with optional rejection reason (sends rejection email with reason)
+- **Cancel Requests**: Cancel requests with optional cancellation reason (sends cancellation email with reason)
+- **Delete Requests**: Permanently delete individual requests (with confirmation)
+- **Clear All**: Delete all private slot requests at once (with confirmation)
 
 ## Security Notes
 
 - Use HTTPS in production
 - Regularly update PHP and MySQL
 - Keep OAuth credentials secure
+- Ensure email server is properly configured to prevent spam
+- Use CSRF tokens for all form submissions (already implemented)
 
 ## Troubleshooting
 
@@ -202,6 +261,24 @@ FYC701,Air Arabia,OMDB,OEJN,08:00,09:30,A320,UBBLB UL602,U1
 ### Permission Errors
 - Check file permissions on `public/uploads`
 - Ensure PHP has write access to the uploads directory
+
+### Email Notifications Not Sending
+- Verify PHP `mail()` function is enabled
+- Check server email configuration
+- Review PHP error logs for mail-related errors
+- Ensure `EMAIL_FROM_ADDRESS` is properly configured (if using custom sender)
+- Check spam/junk folders (emails may be filtered)
+
+### Database Character Set Issues
+- Ensure your database uses `utf8mb4` character set for proper Unicode support
+- To convert manually, run:
+  ```sql
+  ALTER DATABASE `your_database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+  ```
+- To convert existing tables:
+  ```sql
+  ALTER TABLE `table_name` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+  ```
 
 ## Support
 
