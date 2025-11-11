@@ -1103,6 +1103,22 @@ textarea {
   height: 16px;
 }
 
+.nav-username {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(52, 65, 84, 0.5);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .content-area {
   flex: 1;
   padding: 0.8rem 1rem;

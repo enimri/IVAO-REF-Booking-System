@@ -221,6 +221,28 @@ try {
 			}
 		}
 	}
+	// Ensure rejection_reason column exists
+	if (!in_array('rejection_reason', $columns)) {
+		try {
+			$pdo->exec('ALTER TABLE private_slot_requests ADD COLUMN rejection_reason TEXT NULL AFTER status');
+			$success[] = "✅ Added 'rejection_reason' column to 'private_slot_requests' table";
+		} catch (Throwable $e) {
+			if (strpos($e->getMessage(), 'Duplicate column') === false) {
+				$warnings[] = "⚠️ Could not add 'rejection_reason' to 'private_slot_requests': " . $e->getMessage();
+			}
+		}
+	}
+	// Ensure cancellation_reason column exists
+	if (!in_array('cancellation_reason', $columns)) {
+		try {
+			$pdo->exec('ALTER TABLE private_slot_requests ADD COLUMN cancellation_reason TEXT NULL AFTER rejection_reason');
+			$success[] = "✅ Added 'cancellation_reason' column to 'private_slot_requests' table";
+		} catch (Throwable $e) {
+			if (strpos($e->getMessage(), 'Duplicate column') === false) {
+				$warnings[] = "⚠️ Could not add 'cancellation_reason' to 'private_slot_requests': " . $e->getMessage();
+			}
+		}
+	}
 } catch (Throwable $e) {
 	$errors[] = "❌ Error with 'private_slot_requests' table: " . $e->getMessage();
 }
@@ -258,7 +280,7 @@ try {
 	$errors[] = "❌ Error with 'airports' table: " . $e->getMessage();
 }
 
-// 9. Verify database character set
+// 9. Verify and optionally convert database character set
 try {
 	if (!empty($DB_NAME)) {
 		$stmt = $pdo->prepare("SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME 
@@ -267,8 +289,29 @@ try {
 		$dbInfo = $stmt->fetch();
 		
 		if ($dbInfo) {
-			if (strpos($dbInfo['DEFAULT_CHARACTER_SET_NAME'], 'utf8mb4') === false) {
-				$warnings[] = "⚠️ Database character set is '{$dbInfo['DEFAULT_CHARACTER_SET_NAME']}', recommended: utf8mb4";
+			$currentCharset = $dbInfo['DEFAULT_CHARACTER_SET_NAME'];
+			if (strpos($currentCharset, 'utf8mb4') === false) {
+				// Try to convert database to utf8mb4
+				try {
+					$pdo->exec("ALTER DATABASE `{$DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+					$success[] = "✅ Converted database character set from '{$currentCharset}' to utf8mb4";
+					
+					// Convert all tables to utf8mb4
+					$tables = ['users', 'user_roles', 'events', 'flights', 'bookings', 'private_slot_requests', 'airlines', 'airports'];
+					foreach ($tables as $table) {
+						try {
+							$pdo->exec("ALTER TABLE `{$table}` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+						} catch (Throwable $e) {
+							// Table might not exist yet, ignore
+						}
+					}
+					$success[] = "✅ Converted all tables to utf8mb4";
+				} catch (Throwable $e) {
+					// Conversion might require higher privileges or fail for other reasons
+					$warnings[] = "⚠️ Database character set is '{$currentCharset}', recommended: utf8mb4";
+					$warnings[] = "⚠️ Could not automatically convert: " . $e->getMessage();
+					$warnings[] = "⚠️ To convert manually, run: ALTER DATABASE `{$DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+				}
 			} else {
 				$success[] = "✅ Database character set is utf8mb4";
 			}
