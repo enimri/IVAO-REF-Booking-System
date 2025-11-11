@@ -327,6 +327,8 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 									$airlineIata = $airlineCodes['iata'];
 									$airlineIcao = $airlineCodes['icao'];
 								}
+								
+								$airlineLogoUrl = get_airline_logo_url($airlineIata, $airlineIcao, $airlineName);
 							?>
 							<tr>
 								<td data-label="Flight Number"><?php echo e($f['flight_number']); ?></td>
@@ -356,6 +358,7 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 										'airline_name' => $airlineName ?: '',
 										'airline_iata' => $airlineIata,
 										'airline_icao' => $airlineIcao,
+										'airline_logo_url' => $airlineLogoUrl,
 										'aircraft' => $f['aircraft'],
 										'origin_icao' => $originIcao,
 										'origin_name' => $originName ?: '',
@@ -451,38 +454,21 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 			return String.fromCodePoint(...codePoints);
 		}
 		
-		function setAirlineLogo(logoElement, iata, icao, airlineName) {
+		function setAirlineLogo(logoElement, iata, icao, airlineName, logoUrl) {
 			// Show full airline name or fallback
 			const displayText = airlineName || iata || icao || 'Airline';
 			
 			// Clear previous content
 			logoElement.innerHTML = '';
+			logoElement.style.display = '';
+			logoElement.style.alignItems = '';
+			logoElement.style.justifyContent = '';
+			logoElement.style.fontSize = '';
+			logoElement.style.padding = '';
+			logoElement.style.whiteSpace = '';
+			logoElement.style.textAlign = '';
 			
-			// Try to load image from Kiwi.com if IATA code is available
-			if (iata && iata.length === 2) {
-				const img = document.createElement('img');
-				img.src = `https://images.kiwi.com/airlines/64x64/${iata}.png?default=airline.png`;
-				img.alt = displayText;
-				img.style.width = '100%';
-				img.style.height = '100%';
-				img.style.objectFit = 'contain';
-				img.style.borderRadius = '4px';
-				
-				// Fallback to text if image fails to load
-				img.onerror = function() {
-					logoElement.innerHTML = displayText;
-					logoElement.style.display = 'flex';
-					logoElement.style.alignItems = 'center';
-					logoElement.style.justifyContent = 'center';
-					logoElement.style.fontSize = '12px';
-					logoElement.style.padding = '0 8px';
-					logoElement.style.whiteSpace = 'nowrap';
-					logoElement.style.textAlign = 'center';
-				};
-				
-				logoElement.appendChild(img);
-			} else {
-				// No IATA code, show text fallback
+			const showFallback = () => {
 				logoElement.innerHTML = displayText;
 				logoElement.style.display = 'flex';
 				logoElement.style.alignItems = 'center';
@@ -491,6 +477,26 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 				logoElement.style.padding = '0 8px';
 				logoElement.style.whiteSpace = 'nowrap';
 				logoElement.style.textAlign = 'center';
+			};
+			
+			if (logoUrl) {
+				const img = document.createElement('img');
+				img.src = logoUrl;
+				img.alt = displayText;
+				img.style.width = '100%';
+				img.style.height = '100%';
+				img.style.objectFit = 'contain';
+				img.style.borderRadius = '4px';
+				
+				// Fallback to text if image fails to load
+				img.onerror = function() {
+					showFallback();
+				};
+				
+				logoElement.appendChild(img);
+			} else {
+				// No IATA code, show text fallback
+				showFallback();
 			}
 		}
 		
@@ -512,7 +518,7 @@ $MetaPageImage = base_url('public/uploads/logo.png');
 			const iataCode = flightData.airline_iata || null;
 			const icaoCode = flightData.airline_icao || null;
 			
-			setAirlineLogo(airlineLogo, iataCode, icaoCode, airlineName);
+			setAirlineLogo(airlineLogo, iataCode, icaoCode, airlineName, flightData.airline_logo_url || null);
 			
 			// Set departure
 			document.getElementById('modalOriginFlag').textContent = getCountryFlag(flightData.origin_country);
