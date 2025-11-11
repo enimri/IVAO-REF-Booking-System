@@ -5549,8 +5549,8 @@ id,IATA,ICAO,Airline,Callsign,wikimedia_logo_url
 5557,,VLA,Valan International Cargo Charter,NALAU,https://www.flightaware.com/images/airline_logos/180px/VLA.png
 5558,,VLN,Valan Limited,VALAN,https://www.flightaware.com/images/airline_logos/180px/VLN.png
 5559,,EHR,Valfell-Verkflug,ROTOR,https://www.flightaware.com/images/airline_logos/180px/EHR.png
-5560,VF,VLU,Valuair,VALUAIR,https://www.flightaware.com/images/airline_logos/180px/VLU.png
-5561,VF,,AnadoluJet,AJet,
+5560,,VLU,Valuair,VALUAIR,https://www.flightaware.com/images/airline_logos/180px/VLU.png
+5561,VF,,AnadoluJet,AJet,https://www.flightaware.com/images/airline_logos/180px/TKJ.png
 5562,J7,VJA,ValuJet Airlines,CRITTER,https://www.flightaware.com/images/airline_logos/180px/VJA.png
 5563,,VAA,Van Air Europe,EUROVAN,https://www.flightaware.com/images/airline_logos/180px/VAA.png
 5564,,VGC,Vanguardia en Aviación en Colima,VANGUARDIA COLIMA,https://www.flightaware.com/images/airline_logos/180px/VGC.png
