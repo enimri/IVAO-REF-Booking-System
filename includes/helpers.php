@@ -70,6 +70,107 @@ function get_airline_name_from_flight(string $flight_number): ?string {
 	return null;
 }
 
+/**
+ * Retrieve airline logo URL from navdata CSV based on IATA/ICAO codes or airline name.
+ */
+function get_airline_logo_url(?string $iata, ?string $icao, ?string $airline_name): ?string {
+	static $logoMap = null;
+	
+	if ($logoMap === null) {
+		$logoMap = ['iata' => [], 'icao' => [], 'name' => []];
+		$pathCandidates = [
+			dirname(__DIR__) . DIRECTORY_SEPARATOR . 'navdata_airlines.csv',
+			dirname(__DIR__) . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'navdata_airlines.csv',
+		];
+		
+		$csvPath = null;
+		foreach ($pathCandidates as $candidate) {
+			if (is_readable($candidate)) {
+				$csvPath = realpath($candidate);
+				break;
+			}
+		}
+		
+		if ($csvPath && ($handle = fopen($csvPath, 'r')) !== false) {
+			$header = fgetcsv($handle);
+			if (is_array($header) && !empty($header)) {
+				$header[0] = preg_replace('/^\xEF\xBB\xBF/', '', $header[0] ?? '');
+				$indexes = array_flip($header);
+				$iataIndex = $indexes['IATA'] ?? null;
+				$icaoIndex = $indexes['ICAO'] ?? null;
+				$nameIndex = $indexes['Airline'] ?? null;
+				$logoIndex = $indexes['wikimedia_logo_url'] ?? null;
+				
+				if ($logoIndex !== null) {
+					while (($row = fgetcsv($handle)) !== false) {
+						if (!is_array($row) || (count($row) === 1 && $row[0] === null)) {
+							continue;
+						}
+						
+						$logoUrl = isset($row[$logoIndex]) ? trim((string)$row[$logoIndex]) : '';
+						if ($logoUrl === '') {
+							continue;
+						}
+						
+						if ($iataIndex !== null && isset($row[$iataIndex])) {
+							$iataCode = strtoupper(trim((string)$row[$iataIndex]));
+							if ($iataCode !== '') {
+								$logoMap['iata'][$iataCode] = $logoUrl;
+							}
+						}
+						
+						if ($icaoIndex !== null && isset($row[$icaoIndex])) {
+							$icaoCode = strtoupper(trim((string)$row[$icaoIndex]));
+							if ($icaoCode !== '') {
+								$logoMap['icao'][$icaoCode] = $logoUrl;
+							}
+						}
+						
+						if ($nameIndex !== null && isset($row[$nameIndex])) {
+							$airline = trim((string)$row[$nameIndex]);
+							if ($airline !== '') {
+								$normalizedName = preg_replace('/\s+/', ' ', $airline);
+								if (function_exists('mb_strtoupper')) {
+									$normalizedName = mb_strtoupper($normalizedName, 'UTF-8');
+								} else {
+									$normalizedName = strtoupper($normalizedName);
+								}
+								$logoMap['name'][$normalizedName] = $logoUrl;
+							}
+						}
+					}
+				}
+			}
+			
+			fclose($handle);
+		}
+	}
+	
+	$lookupIata = $iata !== null ? strtoupper(trim($iata)) : '';
+	if ($lookupIata !== '' && isset($logoMap['iata'][$lookupIata])) {
+		return $logoMap['iata'][$lookupIata];
+	}
+	
+	$lookupIcao = $icao !== null ? strtoupper(trim($icao)) : '';
+	if ($lookupIcao !== '' && isset($logoMap['icao'][$lookupIcao])) {
+		return $logoMap['icao'][$lookupIcao];
+	}
+	
+	$lookupName = $airline_name !== null ? preg_replace('/\s+/', ' ', trim($airline_name)) : '';
+	if ($lookupName !== '') {
+		if (function_exists('mb_strtoupper')) {
+			$lookupName = mb_strtoupper($lookupName, 'UTF-8');
+		} else {
+			$lookupName = strtoupper($lookupName);
+		}
+		if (isset($logoMap['name'][$lookupName])) {
+			return $logoMap['name'][$lookupName];
+		}
+	}
+	
+	return null;
+}
+
 function get_airport_name_from_icao(string $icao): ?string {
 	static $cache = [];
 	$icaoUpper = strtoupper(trim($icao));
